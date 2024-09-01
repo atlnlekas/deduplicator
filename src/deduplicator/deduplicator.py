@@ -3,6 +3,7 @@ from collections import defaultdict
 import hashlib
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from loguru import logger
 
@@ -35,7 +36,7 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
     hashes_by_size = defaultdict(list)  # dict of size_in_bytes: [full_path_to_file1, full_path_to_file2, ]
     hashes_on_1k = defaultdict(list)  # dict of (hash1k, size_in_bytes): [full_path_to_file1, full_path_to_file2, ]
     hashes_full = {}   # dict of full_file_hash: full_path_to_file_string
-
+    stats = {"duplicates": 0, "files": 0, "duplicates_deleted": 0, "small_hashed": 0, "full_hashed": 0}
     logger.info(f"Checking paths: {paths}")
     for path in paths:
         for dirpath, dirnames, filenames in os.walk(path):
@@ -52,7 +53,12 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
                     # not accessible (permissions, etc) - pass on
                     continue
 
+    found_files = sum([len(files) for size_in_bytes, files in hashes_by_size.items()])
+    logger.info(f"Found {found_files} files with the same size")
+    stats["files"] = found_files
+
     logger.info("Small Hashing files...")
+    small_hashed_files = 0
     # For all files with the same file size, get their hash on the 1st 1024 bytes only
     for size_in_bytes, files in hashes_by_size.items():
         if len(files) < 2:
@@ -61,6 +67,7 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
         for filename in files:
             try:
                 small_hash = get_hash(filename, first_chunk_only=True)
+                small_hashed_files += 1
                 # the key is the hash on the first 1024 bytes plus the size - to
                 # avoid collisions on equal hashes in the first part of the file
                 # credits to @Futal for the optimization
@@ -69,6 +76,11 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
                 # the file access might've changed till the exec point got here
                 continue
 
+    found_files = sum([len(files) for small_hash, files in hashes_on_1k.items()])
+    logger.info(f"Found {found_files} files with the same size and hash")
+    stats["small_hashed"] = small_hashed_files
+
+    full_hash_files = 0
     logger.info("Full Hashing files...")
     # For all files with the hash on the 1st 1024 bytes, get their hash on the full file - collisions will be duplicates
     for __, files_list in hashes_on_1k.items():
@@ -78,6 +90,7 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
         for filename in files_list:
             try:
                 full_hash = get_hash(filename, first_chunk_only=False)
+                full_hash_files += 1
                 try:
                     hashes_full[full_hash].append({"filename": filename, "path": filename, "filename_len": len(Path(filename).parts), "hash": full_hash})
                 except (Exception):
@@ -87,21 +100,65 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
                 # the file access might've changed till the exec point got here
                 continue
 
+    stats["full_hashed"] = full_hash_files
+
+    duplicates_deleted = 0
     logger.info("Deleting duplicates...")
     for key, item in hashes_full.items():
-        logger.info(f"Duplicate Hash: {key} | Files: {str(item).join('\n')}")
+        logger.info(f"Duplicate Hash: {key} | Files: {("\n").join([_["filename"] for _ in item ])}")
         all_files_of_hash = sorted(item, key=lambda x: x["filename_len"])
         logger.info(f"Shortest path: {all_files_of_hash[0]['path']}")
         logger.info(f"Deleting the rest of the files...")
         for path in all_files_of_hash[1:]:
             logger.info(f"Deleting {path['path']}")
             Path(path["path"]).unlink()
+            duplicates_deleted += 1
+    logger.info(f"Deleted {duplicates_deleted} duplicates")
+    stats["duplicates_deleted"] = duplicates_deleted
+    return stats
+
+
+def rename_files_with_metadata(paths, keep_folders=False, append_name=False):
+    for path in paths:
+        logger.info(f"Renaming files in {path}")
+        sorted_path = Path(path).joinpath("__sorted")
+        for dirpath, dirnames, filenames in os.walk(path):
+            for filename in filenames:
+                full_path = Path(dirpath, filename)
+                try:
+                    create_date = datetime.fromtimestamp(full_path.stat().st_ctime)
+                    modified_date = datetime.fromtimestamp(full_path.stat().st_mtime)
+
+                    create_date_string = f"Create-{create_date.strftime("%Y-%m-%d_%H-%M-%S")}"
+                    modified_date_string = f"Mod-{modified_date.strftime("%Y-%m-%d_%H-%M-%S")}"
+
+
+                    size_string = f"Size-{round(full_path.stat().st_size / 1024, 0)}KB"
+                    creator = f"User-{full_path.stat().st_uid}-{full_path.stat().st_gid}"
+
+                    new_file_name = f"{create_date_string}__{modified_date_string}__{size_string}__{creator}"
+
+                    if append_name:
+                        new_file_name = f"{new_file_name}__{full_path.name}"
+
+                    if keep_folders:
+                        new_file_name = full_path.with_stem(new_file_name)
+                    else:
+                        new_file_name = Path(sorted_path, new_file_name)
+
+                    logger.info(f"Renaming {full_path} to {new_file_name}")
+                    # new_file_name.write_bytes(full_path.read_bytes())
+                    # full_path.unlink()
+                except (OSError,):
+                    # not accessible (permissions, etc) - pass on
+                    continue
 
 if __name__ == "__main__":
     logger.add("/c/Users/noah/repos/deduplicator/deduplicator.log", rotation="10 MB")
     logger.info("Starting deduplicator...")
     if sys.argv[1:]:
-        check_for_duplicates(sys.argv[1:])
+        print(check_for_duplicates(sys.argv[1:]))
+        rename_files_with_metadata(sys.argv[1:], keep_folders=True, append_name=True)
     else:
         print("Please pass the paths to check as parameters to the script")
     logger.info("Finished deduplicator...")

@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+import argparse
+import json
+import tempfile
+import zipfile
+from argparse import Namespace
 from collections import defaultdict
 import hashlib
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
+from random import random, randint
+from typing import List, Dict, Any
+
 from loguru import logger
 
 
@@ -118,47 +126,147 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
     return stats
 
 
-def rename_files_with_metadata(paths, keep_folders=False, append_name=False):
+def find_copy_files_by_ext(
+    paths: List[Path], keep_folders=False, append_name=False,
+    file_types: List[str] = None, output_path: Path = None,
+    exclude_folders: List[str] = None
+) -> Dict[str, Any]:
+    """Find and copy files, renaming them based on metadata."""
+    stats = {
+        "run_info": {
+            "paths": paths, "keep_folders": keep_folders,
+            "append_name": append_name, "file_types": file_types,
+            "output_path": output_path, "exclude_folders": exclude_folders
+        },
+        "stats": {"total_files": 0, "errors": []},
+        "affected_files": []
+    }
+
+    if output_path:
+        output_path = Path(output_path)
+    else:
+        raise ValueError("Output path is required")
+
+    output_path.mkdir(exist_ok=True)
+
     for path in paths:
-        logger.info(f"Renaming files in {path}")
-        sorted_path = Path(path).joinpath("__sorted")
-        for dirpath, dirnames, filenames in os.walk(path):
-            for filename in filenames:
-                full_path = Path(dirpath, filename)
-                try:
-                    create_date = datetime.fromtimestamp(full_path.stat().st_ctime)
-                    modified_date = datetime.fromtimestamp(full_path.stat().st_mtime)
+        logger.info(f"Processing path: {path}")
+        _process_directory(path, keep_folders, append_name, file_types, output_path, exclude_folders, stats)
 
-                    create_date_string = f"Create-{create_date.strftime("%Y-%m-%d_%H-%M-%S")}"
-                    modified_date_string = f"Mod-{modified_date.strftime("%Y-%m-%d_%H-%M-%S")}"
+    return stats
 
 
-                    size_string = f"Size-{round(full_path.stat().st_size / 1024, 0)}KB"
-                    creator = f"User-{full_path.stat().st_uid}-{full_path.stat().st_gid}"
+def _process_directory(
+    path: Path, keep_folders: bool, append_name: bool,
+    file_types: List[str], output_path: Path,
+    exclude_folders: List[str], stats: Dict[str, Any],
+    zip_path: Path = None,
+):
+    """Process files in a directory."""
+    for dirpath, dirnames, filenames in os.walk(path):
+        for filename in filenames:
+            full_path = Path(dirpath) / filename
+            if file_types and full_path.suffix not in file_types:
+                continue
+            if exclude_folders and any(exclude_folder in full_path.parts for exclude_folder in exclude_folders):
+                continue
+            if full_path.suffix == '.zip':
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_path = Path(temp_dir)
+                    with zipfile.ZipFile(full_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_path)
 
-                    new_file_name = f"{create_date_string}__{modified_date_string}__{size_string}__{creator}"
+                    _process_directory(path=temp_path, append_name=True, keep_folders=True, file_types=file_types, output_path=output_path, exclude_folders=exclude_folders, stats=stats, zip_path=Path(full_path.parent, full_path.stem))
+                continue
 
-                    if append_name:
-                        new_file_name = f"{new_file_name}__{full_path.name}"
+            try:
+                create_date = datetime.fromtimestamp(full_path.stat().st_ctime)
+                modified_date = datetime.fromtimestamp(full_path.stat().st_mtime)
 
-                    if keep_folders:
-                        new_file_name = full_path.with_stem(new_file_name)
+                create_date_string = f"Create-{create_date.strftime('%Y-%m-%d_%H-%M-%S')}"
+                modified_date_string = f"Mod-{modified_date.strftime('%Y-%m-%d_%H-%M-%S')}"
+                size_string = f"Size-{int(round(full_path.stat().st_size / 1024, 0))}KB"
+                creator = f"User-{full_path.stat().st_uid}-{full_path.stat().st_gid}"
+
+                new_file_name = f"{create_date_string}__{modified_date_string}__{size_string}__{creator}"
+                if append_name:
+                    new_file_name = f"{new_file_name}__{full_path.stem}"
+
+                new_file_name = new_file_name.replace(".", "_").replace(" ", "_") + full_path.suffix
+
+                if keep_folders:
+                    if zip_path:
+                        full_path_string = Path(*full_path.parts[1:])
+                        new_file_name = output_path.joinpath(zip_path, new_file_name)
                     else:
-                        new_file_name = Path(sorted_path, new_file_name)
+                        old_path_string = Path(*full_path.parts[1:-1])
+                        new_file_name = output_path.joinpath(old_path_string, new_file_name)
+                else:
+                    new_file_name = output_path / new_file_name
 
-                    logger.info(f"Renaming {full_path} to {new_file_name}")
-                    # new_file_name.write_bytes(full_path.read_bytes())
-                    # full_path.unlink()
-                except (OSError,):
-                    # not accessible (permissions, etc) - pass on
-                    continue
+                logger.info(f"Renaming {full_path} to {new_file_name}")
+                new_file_name.parent.mkdir(exist_ok=True, parents=True)
+                if new_file_name.exists():
+                    logger.warning(f"File {new_file_name} already exists")
+                    stats["stats"]["errors"].append({"file": full_path, "error": f"File {new_file_name} already exists"})
+                    new_file_name = new_file_name.parent / f"{new_file_name.stem}_{randint(0, 100000)}{new_file_name.suffix}"
+                new_file_name.write_bytes(full_path.read_bytes())
+                stats["affected_files"].append({"old": full_path, "new": new_file_name})
+                stats["stats"]["total_files"] += 1
+            except OSError as e:
+                logger.error(f"Error renaming {full_path}: {e}")
+                stats["stats"]["errors"].append({"file": full_path, "error": str(e)})
+
+
+def parse_args(args: List[str]) -> Namespace:
+    parser = argparse.ArgumentParser(description="Clean up duplicate files by type")
+    parser.add_argument("paths", nargs="+", help="Paths to check for duplicates", type=Path)
+    parser.add_argument("--keep-folders", action="store_true", help="Keep the folder structure")
+    parser.add_argument("--append-name", action="store_true", help="Append the original name to the new name")
+    parser.add_argument("--file-types", nargs="+", help="File types to check for duplicates")
+    parser.add_argument("--output-path", help="Path to output the sorted files", type=Path)
+    parser.add_argument("--exclude-folders", nargs="+", help="Folders to exclude from the search")
+    parser.add_argument("--stats_path", help="Path to output the stats", type=Path)
+    return parser.parse_args(args)
+
+def main(args: List[str]) -> Dict[str, Any]:
+    args = parse_args(args)
+    output_path = Path(args.output_path)
+
+    if not output_path:
+        raise ValueError("Output path is required")
+
+    output_path.mkdir(exist_ok=True)
+
+    copy_stats = find_copy_files_by_ext(
+        output_path=output_path,
+                           paths=args.paths,
+                           keep_folders=args.keep_folders,
+                           append_name=args.append_name,
+                           file_types=args.file_types,
+                            exclude_folders=args.exclude_folders,
+
+    )
+
+    dedup_stats = check_for_duplicates([output_path])
+    stats = {"copy_stats": copy_stats, "dedup_stats": dedup_stats}
+    if args.stats_path:
+        args.statspath.mkdir(exist_ok=True, parents=True)
+        stats_file = args.statspath.joinpath(f"{datetime.now(UTC)}_dedup_stats.json")
+    else:
+        stats_file = Path.home().joinpath(f"{datetime.now(UTC)}_dedup_stats.json")
+
+    with open(stats_file, "w") as f:
+        json.dump(stats, f)
+
+    return stats
+
+def run():
+    args = sys.argv[1:]
+    stats = main(args)
+    logger.info(stats)
+    return stats
+
 
 if __name__ == "__main__":
-    logger.add("/c/Users/noah/repos/deduplicator/deduplicator.log", rotation="10 MB")
-    logger.info("Starting deduplicator...")
-    if sys.argv[1:]:
-        print(check_for_duplicates(sys.argv[1:]))
-        rename_files_with_metadata(sys.argv[1:], keep_folders=True, append_name=True)
-    else:
-        print("Please pass the paths to check as parameters to the script")
-    logger.info("Finished deduplicator...")
+    run()

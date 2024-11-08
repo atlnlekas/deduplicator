@@ -238,7 +238,7 @@ def _process_directory(
                             output_path=output_path,
                             exclude_folders=exclude_folders,
                             stats=stats,
-                            zip_path=Path(full_path.parent, full_path.stem),
+                            zip_path=Path(full_path.parent, full_path.stem).relative_to(path),
                         )
                     continue
                 except Exception as e:
@@ -272,14 +272,16 @@ def _process_directory(
                     size_string = (
                         f"Size-{int(round(full_path.stat().st_size / 1024, 0))}KB"
                     )
-                    creator = (
-                        f"User-{full_path.stat().st_uid}-{full_path.stat().st_gid}"
-                    )
+
+                    file_path = "-".join([str(part) for part in Path(dirpath).relative_to(path).parts])
+
+                    if file_path is "":
+                        file_path = "root"
 
                     new_file_name = (f"{create_date_string}__"
                                      f"{modified_date_string}__"
                                      f"{size_string}__"
-                                     f"{creator}")
+                                     f"{file_path}")
                     if append_name:
                         new_file_name = f"{new_file_name}__{full_path.stem}"
 
@@ -327,27 +329,41 @@ def _process_directory(
 
 def parse_args(args: List[str]) -> Namespace:
     parser = argparse.ArgumentParser(description="Clean up duplicate files by type")
+
     parser.add_argument(
         "paths", nargs="+", help="Paths to check for duplicates", type=Path
     )
+
     parser.add_argument(
         "--keep-folders", action="store_true", help="Keep the folder structure"
     )
+
     parser.add_argument(
         "--append-name",
         action="store_true",
         help="Append the original name to the new name",
     )
+
     parser.add_argument(
         "--file-types", nargs="+", help="File types to check for duplicates"
     )
+
     parser.add_argument(
         "--output-path", help="Path to output the sorted files", type=Path
     )
+
     parser.add_argument(
         "--exclude-folders", nargs="+", help="Folders to exclude from the search"
     )
+
     parser.add_argument("--stats_path", help="Path to output the stats", type=Path)
+
+    parser.add_argument("--rename", action="store_true", help="Rename files")
+
+    parser.add_argument("--keep-deepest-path", action="store_true", help="Keep the deepest path")
+
+    parser.add_argument("--keep-shallowest-path", action="store_true", help="Keep the shallowest path")
+
     return parser.parse_args(args)
 
 

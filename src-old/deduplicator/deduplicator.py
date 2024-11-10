@@ -3,7 +3,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 import tempfile
 import zipfile
@@ -141,8 +140,10 @@ def check_for_duplicates(paths, hash=hashlib.sha1):
     duplicates_deleted = 0
     logger.info("Deleting duplicates...")
     for key, item in hashes_full.items():
-        hashed_files = "\n".join([_["filename"] for _ in item])
-        logger.info(f"Duplicate Hash: {key} " f"| Files: {hashed_files}")
+        logger.info(
+            f"Duplicate Hash: {key} "
+            f"| Files: {'\n'.join([_["filename"] for _ in item])}"
+        )
         all_files_of_hash = sorted(item, key=lambda x: x["filename_len"])
         logger.info(f"Shortest path: {all_files_of_hash[0]['path']}")
         logger.info("Deleting the rest of the files...")
@@ -237,9 +238,7 @@ def _process_directory(
                             output_path=output_path,
                             exclude_folders=exclude_folders,
                             stats=stats,
-                            zip_path=Path(full_path.parent, full_path.stem).relative_to(
-                                path
-                            ),
+                            zip_path=Path(full_path.parent, full_path.stem).relative_to(path),
                         )
                     continue
                 except Exception as e:
@@ -274,19 +273,15 @@ def _process_directory(
                         f"Size-{int(round(full_path.stat().st_size / 1024, 0))}KB"
                     )
 
-                    file_path = "-".join(
-                        [str(part) for part in Path(dirpath).relative_to(path).parts]
-                    )
+                    file_path = "-".join([str(part) for part in Path(dirpath).relative_to(path).parts])
 
-                    if file_path == "":
+                    if file_path is "":
                         file_path = "root"
 
-                    new_file_name = (
-                        f"{create_date_string}__"
-                        f"{modified_date_string}__"
-                        f"{size_string}__"
-                        f"{file_path}"
-                    )
+                    new_file_name = (f"{create_date_string}__"
+                                     f"{modified_date_string}__"
+                                     f"{size_string}__"
+                                     f"{file_path}")
                     if append_name:
                         new_file_name = f"{new_file_name}__{full_path.stem}"
 
@@ -295,11 +290,11 @@ def _process_directory(
                         + full_path.suffix
                     )
                 else:
-                    new_file_name = f"""{full_path.stem.replace(
+                    new_file_name = f"{full_path.stem.replace(
                         ".", "_"
                     ).replace(
                         " ", "_"
-                    )}{full_path.suffix}"""
+                    )}{full_path.suffix}"
 
                 new_file_path = base_path / new_file_name
 
@@ -315,9 +310,10 @@ def _process_directory(
                         }
                     )
                     new_file_path = (
-                        new_file_path.parent / f"{new_file_path.stem}_"
-                        f"{randint(0, 100000)}"
-                        f"{new_file_path.suffix}"
+                        new_file_path.parent
+                        / f"{new_file_path.stem}_"
+                          f"{randint(0, 100000)}"
+                          f"{new_file_path.suffix}"
                     )
                     logger.info(f"Renaming {full_path} to {new_file_path}")
 
@@ -364,13 +360,9 @@ def parse_args(args: List[str]) -> Namespace:
 
     parser.add_argument("--rename", action="store_true", help="Rename files")
 
-    parser.add_argument(
-        "--keep-deepest-path", action="store_true", help="Keep the deepest path"
-    )
+    parser.add_argument("--keep-deepest-path", action="store_true", help="Keep the deepest path")
 
-    parser.add_argument(
-        "--keep-shallowest-path", action="store_true", help="Keep the shallowest path"
-    )
+    parser.add_argument("--keep-shallowest-path", action="store_true", help="Keep the shallowest path")
 
     return parser.parse_args(args)
 
@@ -395,16 +387,14 @@ def main(args: List[str]) -> Dict[str, Any]:
     )
 
     dedup_stats = check_for_duplicates([output_path])
-    stats = {"copy_stats": str(copy_stats), "dedup_stats": str(dedup_stats)}
-    timestamp = re.sub('[<>:"/\\|?*]', "", str(datetime.now(UTC)))
-
+    stats = {"copy_stats": copy_stats, "dedup_stats": dedup_stats}
     if args.stats_path:
         args.statspath.mkdir(exist_ok=True, parents=True)
-        stats_file = args.stats_path.joinpath(f"{timestamp}_dedup_stats.json")
+        stats_file = args.stats_path.joinpath(f"{datetime.now(UTC)}_dedup_stats.json")
     else:
-        stats_file = Path.home().joinpath(f"{timestamp}_dedup_stats.json")
+        stats_file = Path.home().joinpath(f"{datetime.now(UTC)}_dedup_stats.json")
 
-    with stats_file.open("w") as f:
+    with open(stats_file, "w") as f:
         json.dump(stats, f)
 
     return stats

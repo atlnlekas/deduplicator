@@ -11,12 +11,14 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from random import randint
-from typing import Any, Dict, List, io, Generator
+from typing import Any, Dict, Generator, List, io
 
 from loguru import logger
 
 
-def chunk_reader(file_object:io, chunk_size:int=1024) -> Generator[Any, bytes, None]:
+def chunk_reader(
+    file_object: io, chunk_size: int = 1024
+) -> Generator[Any, bytes, None]:
     """
     Generator that reads a file in chunks of bytes
     :param file_object:File object opened in binary or text mode to read from
@@ -30,7 +32,7 @@ def chunk_reader(file_object:io, chunk_size:int=1024) -> Generator[Any, bytes, N
         yield chunk
 
 
-def get_hash(filename: str:, chunk_size:int=1024, hash=hashlib.sha1):
+def get_hash(filename: str, chunk_size: int = 1024, hash=hashlib.sha1):
     """
     chunk reader sends information bit by bit to the hash reader, if first chunk only, sends only first 1024
 
@@ -255,7 +257,9 @@ def _process_directory(
                             output_path=output_path,
                             exclude_folders=exclude_folders,
                             stats=stats,
-                            zip_path=Path(full_path.parent, full_path.stem).relative_to(path),
+                            zip_path=Path(full_path.parent, full_path.stem).relative_to(
+                                path
+                            ),
                         )
                     continue
                 except Exception as e:
@@ -290,15 +294,19 @@ def _process_directory(
                         f"Size-{int(round(full_path.stat().st_size / 1024, 0))}KB"
                     )
 
-                    file_path = "-".join([str(part) for part in Path(dirpath).relative_to(path).parts])
+                    file_path = "-".join(
+                        [str(part) for part in Path(dirpath).relative_to(path).parts]
+                    )
 
                     if file_path is "":
                         file_path = "root"
 
-                    new_file_name = (f"{create_date_string}__"
-                                     f"{modified_date_string}__"
-                                     f"{size_string}__"
-                                     f"{file_path}")
+                    new_file_name = (
+                        f"{create_date_string}__"
+                        f"{modified_date_string}__"
+                        f"{size_string}__"
+                        f"{file_path}"
+                    )
                     if append_name:
                         new_file_name = f"{new_file_name}__{full_path.stem}"
 
@@ -327,10 +335,9 @@ def _process_directory(
                         }
                     )
                     new_file_path = (
-                        new_file_path.parent
-                        / f"{new_file_path.stem}_"
-                          f"{randint(0, 100000)}"
-                          f"{new_file_path.suffix}"
+                        new_file_path.parent / f"{new_file_path.stem}_"
+                        f"{randint(0, 100000)}"
+                        f"{new_file_path.suffix}"
                     )
                     logger.info(f"Renaming {full_path} to {new_file_path}")
 
@@ -377,9 +384,13 @@ def parse_args(args: List[str]) -> Namespace:
 
     parser.add_argument("--rename", action="store_true", help="Rename files")
 
-    parser.add_argument("--keep-deepest-path", action="store_true", help="Keep the deepest path")
+    parser.add_argument(
+        "--keep-deepest-path", action="store_true", help="Keep the deepest path"
+    )
 
-    parser.add_argument("--keep-shallowest-path", action="store_true", help="Keep the shallowest path")
+    parser.add_argument(
+        "--keep-shallowest-path", action="store_true", help="Keep the shallowest path"
+    )
 
     return parser.parse_args(args)
 

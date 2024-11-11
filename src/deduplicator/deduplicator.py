@@ -11,13 +11,18 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from random import randint
-from typing import Any, Dict, List
+from typing import Any, Dict, List, io, Generator
 
 from loguru import logger
 
 
-def chunk_reader(fobj, chunk_size=1024):
-    """Generator that reads a file in chunks of bytes"""
+def chunk_reader(file_object:io, chunk_size:int=1024) -> Generator[Any, bytes, None]:
+    """
+    Generator that reads a file in chunks of bytes
+    :param file_object:File object opened in binary or text mode to read from
+    :param chunk_size: Number of bytes to read per chunk (default: 1024).
+    :yield: Bytes read from the file, in chunks of the specified size.
+    """
     while True:
         chunk = fobj.read(chunk_size)
         if not chunk:
@@ -25,7 +30,19 @@ def chunk_reader(fobj, chunk_size=1024):
         yield chunk
 
 
-def get_hash(filename, first_chunk_only=False, hash=hashlib.sha1):
+def get_hash(filename: str:, chunk_size:int=1024, hash=hashlib.sha1):
+    """
+    chunk reader sends information bit by bit to the hash reader, if first chunk only, sends only first 1024
+
+    :param filename :name of the file you want to hash
+    :type filename: str
+    :param chunk_size : breaks it up into chunks
+    :type chunk_size: int
+    :param hash : hash function
+    :type hash: hashlib.sha1
+    :return : hashfile
+    :rtype: hashlib.sha1
+    """
     hashobj = hash()
     file_object = open(filename, "rb")
 

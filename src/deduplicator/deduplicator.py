@@ -275,7 +275,7 @@ def _process_directory(
 
                     file_path = "-".join([str(part) for part in Path(dirpath).relative_to(path).parts])
 
-                    if file_path is "":
+                    if file_path == "":
                         file_path = "root"
 
                     new_file_name = (f"{create_date_string}__"
@@ -394,8 +394,8 @@ def main(args: List[str]) -> Dict[str, Any]:
     else:
         stats_file = Path.home().joinpath(f"{datetime.now(UTC)}_dedup_stats.json")
 
-    with open(stats_file, "w") as f:
-        json.dump(stats, f)
+    with stats_file.open("w") as f:
+        f.write(json.dumps(stats))
 
     return stats
 
